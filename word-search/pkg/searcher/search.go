@@ -2,11 +2,12 @@ package searcher
 
 import (
 	"bufio"
-	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"os"
+	"regexp"
 	"strings"
+	"sync"
+	"word-search-in-files/pkg/internal/dir"
 )
 
 type Searcher struct {
@@ -14,27 +15,44 @@ type Searcher struct {
 }
 
 func (s *Searcher) Search(word string) (files []string, err error) {
-	// fileNames, err := dir.FilesFS(s.FS, "/Users/ashuramaru/TTA/word-search/examples")
-	// if err != nil {
-	// 	return nil, err
-	// }
+	path := "Y:/Shun/TTA/word-search/examples/"
 
-	return nil, nil
-}
-
-func (s *Searcher) Test() {
-	data, err := ioutil.ReadFile("/Users/ashuramaru/TTA/word-search/examples")
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(data)
-}
-func indexFile(filePath string) (map[string][]int, error) {
-	index := make(map[string][]int)
-
-	file, err := os.Open(filePath)
+	fileNames, err := dir.FilesFS(s.FS, path)
+	lenFile := len(fileNames)
+	var resultList []string
+	ch := make(chan string, lenFile)
+	var wg sync.WaitGroup
+	wg.Add(lenFile)
 	if err != nil {
 		return nil, err
+	}
+	for i := 0; i < lenFile; i++ {
+		go func(fileName string) {
+			defer wg.Done()
+			indexFile(path, fileName, ch)
+		}(fileNames[i])
+
+	}
+
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	for val := range ch {
+		resultList = append(resultList, val) // Process the received value
+	}
+
+	return resultList, nil
+}
+
+func indexFile(filePath string, fileName string, ch chan string) error {
+	path := filePath + fileName
+	index := make(map[string][]int)
+	reg := regexp.MustCompile(`[^a-zA-Zа-яА-Я0-9]+`)
+	file, err := os.Open(path)
+	if err != nil {
+		return err
 	}
 	defer file.Close()
 
@@ -43,7 +61,8 @@ func indexFile(filePath string) (map[string][]int, error) {
 	lineNumber := 1
 	for scanner.Scan() {
 		line := scanner.Text()
-		words := strings.Split(line, " ")
+		cleanLine := reg.ReplaceAllString(line, " ")
+		words := strings.Fields(cleanLine)
 
 		for _, word := range words {
 			// Приводим слово к нижнему регистру для учета регистра
@@ -55,8 +74,18 @@ func indexFile(filePath string) (map[string][]int, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return err
 	}
+	result := searchSubstring(index, "пока")
+	if result {
+		ch <- fileName
+	}
+	return nil
+}
 
-	return index, nil
+func searchSubstring(index map[string][]int, substring string) bool {
+	// Приводим подстроку к нижнему регистру для учета регистра
+	substring = strings.ToLower(substring)
+	exist := index[substring]
+	return exist != nil
 }
